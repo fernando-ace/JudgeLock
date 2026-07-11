@@ -1,0 +1,65 @@
+# Ready to copy after judgelock@0.1.0 is published to npm.
+# Before publication, replace the npm exec step with a reviewed local/tarball binary.
+name: JudgeLock
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: judgelock-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  test-integrity:
+    name: Test integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BASE_REF: ${{ github.base_ref }}
+      JUDGELOCK_VERSION: 0.1.0
+
+    steps:
+      - name: Check out exact pull-request head
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Fetch trusted base tip
+        shell: bash
+        run: |
+          git fetch --no-tags origin \
+            "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+
+      - name: Install project dependencies
+        run: npm ci
+
+      - name: Run JudgeLock
+        shell: bash
+        run: |
+          set -o pipefail
+          npm exec --yes --package="judgelock@${JUDGELOCK_VERSION}" -- \
+            judgelock ci --base-ref "refs/remotes/origin/${BASE_REF}" --json \
+            | tee judgelock-result.json
+
+      - name: Upload JudgeLock evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: judgelock-${{ github.event.pull_request.head.sha }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            judgelock-result.json
+            .judgelock/receipts/**
+            .judgelock/attempts/**

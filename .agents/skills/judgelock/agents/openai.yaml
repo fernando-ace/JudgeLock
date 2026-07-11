@@ -1,0 +1,5 @@
+interface:
+  display_name: "JudgeLock"
+  short_description: "Guard tests and verify agent changes safely"
+  default_prompt:
+    "Use $judgelock to make this change without weakening existing tests."
