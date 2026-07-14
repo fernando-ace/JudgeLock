@@ -1,4 +1,5 @@
 import { execa } from "execa";
+import { resolve } from "node:path";
 import { ExitCode } from "../constants";
 import { JudgeLockError } from "../errors";
 import type { ChangeKind, ChangedFile, GitTreeEntry } from "../types";
@@ -14,6 +15,10 @@ export interface DiffRecord {
   kind: ChangeKind;
   path: string;
   oldPath?: string;
+}
+
+export function repositoryRootFromCwd(cwd: string, cdup: string): string {
+  return normalizeRepoPath(resolve(cwd, cdup));
 }
 
 function toChangeKind(status: string): ChangeKind {
@@ -69,7 +74,7 @@ export class GitClient {
   }
 
   static async discover(cwd: string): Promise<GitClient> {
-    const result = await execa("git", ["rev-parse", "--show-toplevel"], {
+    const result = await execa("git", ["rev-parse", "--show-cdup"], {
       cwd,
       reject: false,
     });
@@ -80,7 +85,7 @@ export class GitClient {
         remediation: "Run the command inside a Git repository.",
       });
     }
-    return new GitClient(result.stdout.trim());
+    return new GitClient(repositoryRootFromCwd(cwd, result.stdout.trim()));
   }
 
   async run(args: string[]): Promise<GitResult<string>> {
