@@ -14,6 +14,7 @@ export async function resolveSafeRepositoryPath(
   root: string,
   suppliedPath: string,
 ): Promise<{ absolute: string; relative: string }> {
+  const resolvedRoot = await realpath(root);
   const absolute = isAbsolute(suppliedPath)
     ? resolve(suppliedPath)
     : resolve(root, suppliedPath);
@@ -24,7 +25,7 @@ export async function resolveSafeRepositoryPath(
     if (info.isSymbolicLink())
       throw new Error("Writes through symbolic links are not allowed.");
     const resolved = await realpath(absolute);
-    if (!isPathInside(root, resolved))
+    if (!isPathInside(resolvedRoot, resolved))
       throw new Error("Path resolves outside the repository.");
   } catch (error) {
     const code =
