@@ -63,13 +63,16 @@ The result is a `HookStopDecision`:
 ```
 
 JudgeLock permits completion only after it validates the session, fresh
-inspection, receipt digest, passed final status, JudgeLock version, repository
+inspection, receipt digest, final evidence status, JudgeLock version, repository
 identity, baseline/policy commits, current `HEAD`, trusted policy and command
-hashes, current layered fingerprint, and every command result.
+hashes, current layered fingerprint, and every command result. A zero-command
+`inspection_only` receipt authorizes completion only when trusted policy
+explicitly opts in.
 
-A missing, failed, or stale receipt returns `COMPLETION_BLOCKED` with exit 6. A
-new `verify` removes the old active pointer before doing work, so an interrupted
-or failed retry cannot reuse the previous pass.
+A missing, failed, stale, or insufficient inspection-only receipt returns
+`COMPLETION_BLOCKED` with exit 6. A new `verify` removes the old active pointer
+before doing work, so an interrupted or failed retry cannot reuse the previous
+pass.
 
 ## Integration behavior
 

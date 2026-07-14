@@ -78,17 +78,23 @@ identity and order, and successful command results.
 verification is missing or stale. `hook can-stop` enforces the same evidence and
 exits 6 when completion is blocked.
 
-There is no time-to-live in 0.1.0. A receipt remains current until a bound input
-changes. Any relevant content, Git layer, commit, policy, command, repository
-identity, or JudgeLock version change requires verification again.
+There is no time-to-live in 0.1.0-beta.1. A receipt remains current until a
+bound input changes. Any relevant content, Git layer, commit, policy, command,
+repository identity, or JudgeLock version change requires verification again.
 
 ## No validation commands
 
-An empty trusted command list is allowed. The receipt contains an inspection
-result and no command results, and the CLI emits a prominent
-`NO_VALIDATION_COMMANDS` warning. If inspection passes, `can-stop` may pass, but
-the receipt proves only that JudgeLock's integrity checks ran; it does not claim
-that project lint, type-check, or tests ran.
+An empty trusted command list produces `finalStatus: inspection_only`, no
+command results, and a complete repository fingerprint. It is valid evidence but
+does not authorize completion unless trusted policy explicitly sets
+`validation.allowInspectionOnlyCompletion: true`. Legacy zero-command receipts
+mislabeled `passed` are rejected for completion. Full version 1 receipts remain
+readable, but a JudgeLock version mismatch requires fresh verification before
+completion can be authorized.
+
+Status JSON separates `evidenceValid`, `inspectionOnly`, and
+`completionAuthorized`. Human output states that no tests, lint checks, type
+checks, or builds were run.
 
 ## Trust statement
 

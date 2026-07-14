@@ -47,7 +47,9 @@ export function renderVerification(
   const lines = [
     payload.finalStatus === "passed"
       ? color(pc.green, "PASS  JudgeLock verification")
-      : color(pc.red, "FAILED  JudgeLock verification"),
+      : payload.finalStatus === "inspection_only"
+        ? color(pc.yellow, "INSPECTION ONLY  JudgeLock evidence")
+        : color(pc.red, "FAILED  JudgeLock verification"),
     `Receipt: ${receiptPath}`,
     `Fingerprint: ${payload.repositoryStateFingerprint}`,
   ];
@@ -55,7 +57,7 @@ export function renderVerification(
     lines.push(
       color(
         pc.yellow,
-        "WARNING  NO_VALIDATION_COMMANDS - this receipt covers inspection only.",
+        "NO_VALIDATION_COMMANDS - no tests, lint checks, type checks, or builds were run.",
       ),
     );
   } else {

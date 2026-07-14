@@ -22,4 +22,9 @@ export default defineConfig([
     entry: { cli: "src/cli/main.ts" },
     banner: { js: "#!/usr/bin/env node" },
   },
+  {
+    ...shared,
+    clean: false,
+    entry: { "benchmark-api": "src/benchmark-api.ts" },
+  },
 ]);

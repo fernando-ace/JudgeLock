@@ -13,6 +13,9 @@ export interface StatusResult {
   baselineCommit?: string;
   inspection?: "passed" | "blocked";
   validReceipt?: boolean;
+  evidenceValid?: boolean;
+  inspectionOnly?: boolean;
+  completionAuthorized?: boolean;
   receiptMatchesCurrentTree?: boolean;
   receiptPath?: string;
   requiredChecks?: { name: string; passed: boolean }[];
@@ -52,6 +55,9 @@ export async function getStatus(cwd: string): Promise<StatusResult> {
       ? {}
       : { inspection: validation.inspection.status }),
     validReceipt: validation.valid,
+    evidenceValid: validation.evidenceValid,
+    inspectionOnly: validation.inspectionOnly,
+    completionAuthorized: validation.completionAuthorized,
     receiptMatchesCurrentTree,
     ...(validation.receiptPath === undefined
       ? {}
@@ -60,10 +66,10 @@ export async function getStatus(cwd: string): Promise<StatusResult> {
     ...(checks.length === 0
       ? {
           warning:
-            "NO_VALIDATION_COMMANDS: receipt evidence covers JudgeLock inspection only; no project commands are configured.",
+            "NO_VALIDATION_COMMANDS: JudgeLock performed inspection only. No tests, lint checks, type checks, or builds were run.",
         }
       : {}),
-    nextAction: validation.valid
+    nextAction: validation.completionAuthorized
       ? "Completion may be claimed; include the receipt path in the report."
       : validation.reason,
   };

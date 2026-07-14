@@ -1,41 +1,80 @@
 # Claude Code integration
 
-JudgeLock can install project-shared Claude Code hooks that check writes before
-`Edit` or `Write` and require a current passing receipt before Claude stops.
+JudgeLock installs deterministic project-shared Claude Code hooks without
+treating every normal response as a completion claim.
 
-## Install
+The hook contract was checked against the official
+[Claude Code hooks reference](https://code.claude.com/docs/en/hooks) and
+[settings documentation](https://code.claude.com/docs/en/configuration) on
+2026-07-14. Claude Code behavior is version-sensitive; use `/hooks` and
+`/status` to inspect the effective configuration after upgrades.
 
-Install JudgeLock as an exact project dependency so every collaborator and the
-generated hook launcher resolve the same CLI:
+## Safe default installation
+
+Install JudgeLock as an exact project dependency, then install the hooks:
 
 ```sh
-npm install --save-dev --save-exact judgelock@0.1.0
+npm install --save-dev --save-exact judgelock@0.1.0-beta.1
 npx judgelock init
 npx judgelock install claude-code
 ```
 
-The installer merges two synchronous command hooks into `.claude/settings.json`:
+The default installer merges two command-hook groups into
+`.claude/settings.json`:
 
-- An `Edit|Write` `PreToolUse` hook calls
-  `judgelock hook can-write --path <tool_input.file_path> --json`.
-- A matcherless `Stop` hook calls `judgelock hook can-stop --json`.
+- `PreToolUse` with matcher `Edit|Write` calls the generated launcher’s
+  `can-write` action. Exit 2 blocks the tool call.
+- Matcherless `TaskCompleted` calls `judgelock hook can-stop --json`. Exit 2
+  prevents an explicit Claude Code task from being marked complete.
 
-Both settings entries use exec form with the real `node` executable and an
-argument array. The generated `.claude/hooks/judgelock.cjs` launcher resolves
-the local JudgeLock package and never invokes an npm command shim or a shell.
-Malformed hook input, a missing CLI, a denied JudgeLock decision, and any other
-nonzero CLI result all fail closed with Claude hook exit code 2.
+`TaskCompleted` fires for explicit task completion, not for every assistant
+response. This allows Claude to ask clarification questions, report partial
+progress, wait for user input, end a normal non-completion response, and recover
+from failed or interrupted validation without a Stop-hook loop.
 
-The installer preserves unrelated settings and hooks, deduplicates JudgeLock
-entries, and records the launcher hash in
-`.judgelock/integrations/claude-code.json`. Before an install or uninstall
-changes existing integration files, it saves their exact prior bytes and an
-absence/hash manifest below `.judgelock/backups/claude-code/`. Re-running an
-already-current install makes no backup and changes no file.
+The `PreToolUse` payload must identify `hook_event_name: "PreToolUse"`, an
+`Edit` or `Write` tool, and a string `tool_input.file_path`. The `TaskCompleted`
+payload must identify its event and provide `task_id` and `task_subject`.
+Malformed or mismatched payloads fail closed with exit 2.
 
-Do not hand-edit the generated launcher. Install and uninstall refuse to
-overwrite or remove a launcher whose bytes no longer match JudgeLock's recorded
-ownership hash.
+## Opt-in autonomous Stop mode
+
+For an autonomous, single-task session where every normal response is intended
+to represent final completion, install the additional Stop gate explicitly:
+
+```sh
+npx judgelock install claude-code --autonomous-stop-hook
+```
+
+The matcherless `Stop` hook checks `hook can-stop`. The launcher validates the
+current Stop schema, accepts `last_assistant_message` only as an uninterpreted
+string, and never uses an LLM or textual heuristic to decide whether the message
+“sounds complete.” If `stop_hook_active` is true, the launcher allows the Stop
+without invoking JudgeLock so a repeated denial cannot trap the conversation.
+Claude Code independently overrides a Stop hook after eight consecutive blocks.
+
+Running the installer again without `--autonomous-stop-hook` removes only the
+JudgeLock-owned Stop handler and returns to the safe default. Repeating either
+mode is idempotent.
+
+## Launcher and settings behavior
+
+Hook settings invoke `node` with an argument array. The generated CommonJS
+launcher resolves the project-local JudgeLock package and invokes its CLI with
+`process.execPath`, no npm shim, and no shell. This works on native Windows and
+POSIX systems without command-string quoting.
+
+Claude settings from project, local, user, and managed scopes are combined by
+Claude Code; matching hooks from different sources all run. Within the shared
+project settings file, JudgeLock preserves unrelated settings and hook groups,
+removes only handlers with its exact launcher arguments, and appends its owned
+groups. One hook denial does not prevent sibling hooks from running.
+
+Before changing existing settings or launcher bytes, installation and
+uninstallation save an exact backup and manifest below
+`.judgelock/backups/claude-code/`. Ownership state records the launcher hash and
+whether autonomous Stop mode is enabled. JudgeLock refuses to overwrite or
+delete a launcher changed after installation.
 
 ## Uninstall
 
@@ -43,22 +82,16 @@ ownership hash.
 npx judgelock uninstall claude-code
 ```
 
-Uninstall removes only the JudgeLock-owned hook handlers, launcher, and
-ownership record. It preserves every unrelated Claude setting and hook.
+Uninstall removes only JudgeLock-owned handlers, launcher, and ownership state.
+It preserves unrelated hooks and settings and is idempotent.
 
-## Security boundary and limitations
+## Security boundary
 
-Claude Code hooks are cooperative guardrails, not a complete security boundary:
-
-- The `Edit|Write` matcher does not intercept files changed through `Bash` or
-  other tools.
-- Stop hooks do not run when a turn ends because of an interrupt or API failure.
-- Claude Code limits repeated Stop-hook blocking and may eventually override it.
-- A user who can edit the repository can disable project hooks.
+Pre-write hooks are cooperative early feedback, not a filesystem sandbox. The
+`Edit|Write` matcher does not intercept arbitrary Bash commands, other tools, or
+external processes. Stop hooks do not inherently mean task completion and do not
+run for every interrupt or API failure. Project hooks can also be disabled by
+someone who controls the repository.
 
 Run `judgelock inspect` and `judgelock verify` authoritatively, and enforce
-`judgelock ci` in an independent, unprivileged pull-request workflow. The hook
-structure follows the current
-[Claude Code hooks reference](https://code.claude.com/docs/en/hooks), and
-project-shared settings use the documented
-[`.claude/settings.json` scope](https://code.claude.com/docs/en/settings#configuration-scopes).
+`judgelock ci` in independent, unprivileged pull-request CI.

@@ -26,6 +26,7 @@ coverage:
 
 validation:
   protectScripts: true
+  allowInspectionOnlyCompletion: false
   commands: []
   # - name: lint
   #   command: npm run lint
@@ -120,10 +121,14 @@ command-referenced npm scripts, including reachable `pre`, `post`, and nested
 `npm run` dependencies, from changes that narrow validation or alter what a
 trusted command executes.
 
-An empty `commands` list is intentionally valid. Verification then performs
-integrity inspection only, emits `NO_VALIDATION_COMMANDS`, and records no
-command results. Such a receipt may authorize `can-stop`, but it is explicit
-evidence that no project lint, type-check, or tests ran.
+An empty `commands` list is valid for inspection evidence. Verification records
+no command results and gives the receipt the status `inspection_only`.
+`allowInspectionOnlyCompletion` defaults to `false`, including when omitted by
+an older version 1 policy. In that safe default, local `can-stop` returns exit 6
+and CI returns exit 5. Setting it to `true` in trusted policy explicitly permits
+completion, but the evidence remains labeled inspection-only. Human status says
+that no tests, lint checks, type checks, or builds ran; JSON exposes the same
+state structurally.
 
 ## Paths
 

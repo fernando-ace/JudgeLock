@@ -54,7 +54,8 @@ guides cooperation; it is not a security boundary.
 6. Report the inspection result, commands run, completion decision, and active
    receipt path. If the configuration has no validation commands, state
    explicitly that JudgeLock performed inspection only and did not run project
-   lint, type-check, or tests.
+   lint, type-check, tests, or builds. Completion is blocked unless the trusted
+   policy explicitly allows inspection-only completion.
 
 Do not edit `judgelock.yml`, `.judgelock/**`, `.claude/settings.json`, or
 `.claude/hooks/judgelock.cjs` during an active session. Independent CI remains

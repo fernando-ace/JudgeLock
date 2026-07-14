@@ -30,8 +30,8 @@ new policy.
 ## GitHub Actions example
 
 [`examples/github-actions/judgelock.yml`](../examples/github-actions/judgelock.yml)
-is a ready-copy workflow for an npm-based repository after `judgelock@0.1.0` is
-published. It:
+is a ready-copy workflow for an npm-based repository after
+`judgelock@0.1.0-beta.1` is published. It:
 
 - uses only `pull_request` and `contents: read`;
 - checks out `github.event.pull_request.head.sha` with `fetch-depth: 0`;
@@ -46,9 +46,9 @@ untrusted candidate code in a privileged secrets context.
 As of the source release, the npm package is not published. To test the workflow
 before publication, build and pack a reviewed JudgeLock checkout, make the
 tarball available through a trusted internal mechanism, install it into a
-separate tool prefix, and replace the `npm exec --package judgelock@0.1.0` line
-with that reviewed binary. Do not commit a machine-specific absolute path into a
-shared workflow.
+separate tool prefix, and replace the
+`npm exec --package judgelock@0.1.0-beta.1` line with that reviewed binary. Do
+not commit a machine-specific absolute path into a shared workflow.
 
 ## Other CI systems
 
@@ -69,15 +69,16 @@ define the run.
 
 ## Interpreting failures
 
-| Exit | CI interpretation                                                                  |
-| ---: | ---------------------------------------------------------------------------------- |
-|    0 | Integrity inspection and every configured validation command passed.               |
-|    2 | Trusted policy or CLI arguments are invalid.                                       |
-|    3 | Required Git history, candidate commit, or base ref is missing.                    |
-|    4 | Candidate changes violate trusted policy.                                          |
-|    5 | A validation command failed/timed out or relevant state changed during validation. |
-|    7 | Persisted JudgeLock state is corrupt.                                              |
+| Exit | CI interpretation                                                                 |
+| ---: | --------------------------------------------------------------------------------- |
+|    0 | Integrity inspection and every configured validation command passed.              |
+|    2 | Trusted policy or CLI arguments are invalid.                                      |
+|    3 | Required Git history, candidate commit, or base ref is missing.                   |
+|    4 | Candidate changes violate trusted policy.                                         |
+|    5 | Validation failed, state changed, or empty commands did not authorize completion. |
+|    7 | Persisted JudgeLock state is corrupt.                                             |
 
-Exit 0 with `NO_VALIDATION_COMMANDS` means inspection passed but the base policy
-configured no project commands. Treat that warning as a CI configuration gap
-unless inspection-only operation is intentional.
+When the trusted base policy configures no commands, CI writes `inspection_only`
+evidence and exits 5 by default. Exit 0 is possible only when that same trusted
+policy explicitly sets `validation.allowInspectionOnlyCompletion: true`; the
+receipt and JSON output remain labeled inspection-only.

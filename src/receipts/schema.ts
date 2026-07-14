@@ -88,7 +88,7 @@ export const ReceiptPayloadSchema = z
         arch: z.string(),
       })
       .strict(),
-    finalStatus: z.enum(["passed", "failed"]),
+    finalStatus: z.enum(["passed", "failed", "inspection_only"]),
     failureReason: z.string().optional(),
   })
   .strict();

@@ -33,7 +33,7 @@ export async function writeReceipt(options: {
   const identity =
     options.payload.sessionId ??
     `ci-${options.payload.currentHead.slice(0, 12)}`;
-  const suffix = options.payload.finalStatus === "passed" ? "passed" : "failed";
+  const suffix = options.payload.finalStatus.replaceAll("_", "-");
   const path = join(
     directory,
     `${identity}-${safeTimestamp(options.payload.finishedAt)}.${suffix}.json`,

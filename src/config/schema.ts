@@ -81,6 +81,7 @@ export const JudgeLockConfigSchema = z
     validation: z
       .object({
         protectScripts: z.boolean(),
+        allowInspectionOnlyCompletion: z.boolean().default(false),
         commands: z.array(validationCommandSchema).max(100),
       })
       .strict()

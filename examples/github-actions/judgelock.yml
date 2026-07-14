@@ -1,4 +1,4 @@
-# Ready to copy after judgelock@0.1.0 is published to npm.
+# Ready to copy after judgelock@0.1.0-beta.1 is published to npm.
 # Before publication, replace the npm exec step with a reviewed local/tarball binary.
 name: JudgeLock
 
@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 30
     env:
       BASE_REF: ${{ github.base_ref }}
-      JUDGELOCK_VERSION: 0.1.0
+      JUDGELOCK_VERSION: 0.1.0-beta.1
 
     steps:
       - name: Check out exact pull-request head

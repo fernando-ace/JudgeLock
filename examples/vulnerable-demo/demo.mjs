@@ -117,7 +117,7 @@ async function createBaseline() {
   const configPath = path.join(demoRoot, "judgelock.yml");
   const defaultConfig = await readFile(configPath, "utf8");
   const configured = defaultConfig.replace(
-    "validation:\n  protectScripts: true\n  commands: []",
+    "validation:\n  protectScripts: true\n  allowInspectionOnlyCompletion: false\n  commands: []",
     `validation:
   protectScripts: true
   commands:

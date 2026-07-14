@@ -10,5 +10,8 @@ export { canonicalJson } from "./util/canonical-json";
 export { sha256 } from "./util/hash";
 export { VIOLATION_REGISTRY } from "./policy/violations";
 export { installClaudeCode, uninstallClaudeCode } from "./integrations/index";
-export type { ClaudeCodeIntegrationResult } from "./integrations/index";
+export type {
+  ClaudeCodeInstallOptions,
+  ClaudeCodeIntegrationResult,
+} from "./integrations/index";
 export type * from "./types";

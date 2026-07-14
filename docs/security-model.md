@@ -66,9 +66,11 @@ JudgeLock is not:
 Local agent hooks are advisory enforcement running with the agent's permissions.
 They cannot intercept every shell, filesystem API, interrupt, crash, or
 integration escape. Claude Code `Edit|Write` hooks do not cover arbitrary Bash
-mutations, and Stop hooks do not run for every interruption or API failure.
-Always run authoritative `inspect` and `verify`, and use independent CI for
-review gates.
+mutations. The default Claude Code integration uses explicit `TaskCompleted`
+events instead of treating every normal Stop as task completion. Opt-in Stop
+hooks do not run for every interruption or API failure and Claude Code overrides
+them after eight consecutive blocks. Always run authoritative `inspect` and
+`verify`, and use independent CI for review gates.
 
 Static analysis intentionally does not execute JavaScript or TypeScript
 configuration. Dynamic or unsupported forms may produce `ANALYSIS_INCONCLUSIVE`.
@@ -76,9 +78,9 @@ Guarded baseline-test edits fail when JudgeLock cannot establish safety;
 ambiguous global configuration is disclosed as a warning rather than
 misrepresented as fully analyzed.
 
-Submodule Git-link changes are fingerprinted, but 0.1.0 does not recurse into
-nested submodule worktrees. Ignored files are outside the fingerprint unless
-explicitly protected. Choose ignored and protected patterns carefully.
+Submodule Git-link changes are fingerprinted, but 0.1.0-beta.1 does not recurse
+into nested submodule worktrees. Ignored files are outside the fingerprint
+unless explicitly protected. Choose ignored and protected patterns carefully.
 
 ## CI hardening
 

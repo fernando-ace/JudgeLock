@@ -9,6 +9,9 @@ import { sha256 } from "../util/hash";
 
 export interface ActiveReceiptValidation {
   valid: boolean;
+  evidenceValid: boolean;
+  inspectionOnly: boolean;
+  completionAuthorized: boolean;
   reason: string;
   receiptPath?: string;
   inspection?: Awaited<ReturnType<typeof inspectRepository>>["inspection"];
@@ -29,6 +32,9 @@ export async function validateActiveReceipt(
   if (inspection.inspection.status === "blocked") {
     return {
       valid: false,
+      evidenceValid: false,
+      inspectionOnly: false,
+      completionAuthorized: false,
       reason: "Current repository state has blocking policy violations.",
       inspection: inspection.inspection,
     };
@@ -37,12 +43,18 @@ export async function validateActiveReceipt(
   if (!pointer)
     return {
       valid: false,
+      evidenceValid: false,
+      inspectionOnly: false,
+      completionAuthorized: false,
       reason: "No active passing verification receipt exists.",
       inspection: inspection.inspection,
     };
   if (pointer.sessionId !== context.session.sessionId) {
     return {
       valid: false,
+      evidenceValid: false,
+      inspectionOnly: false,
+      completionAuthorized: false,
       reason: "The active receipt belongs to an older session.",
       inspection: inspection.inspection,
     };
@@ -61,9 +73,13 @@ export async function validateActiveReceipt(
         result.status === "passed"
       );
     });
-  const valid =
+  const inspectionOnly = payload.finalStatus === "inspection_only";
+  const statusMatchesCommands =
+    (payload.finalStatus === "passed" && expectedCommands.length > 0) ||
+    (inspectionOnly && expectedCommands.length === 0);
+  const evidenceValid =
     pointer.receiptDigest === receipt.digest.value &&
-    payload.finalStatus === "passed" &&
+    statusMatchesCommands &&
     payload.mode === "local" &&
     payload.sessionId === context.session.sessionId &&
     payload.repositoryId === context.session.repositoryId &&
@@ -74,11 +90,22 @@ export async function validateActiveReceipt(
     payload.repositoryStateFingerprint ===
       inspection.inspection.repositoryStateFingerprint &&
     commandIdentityMatches;
+  const completionAuthorized =
+    evidenceValid &&
+    (!inspectionOnly ||
+      context.config.validation.allowInspectionOnlyCompletion);
   return {
-    valid,
-    reason: valid
-      ? "Receipt matches the exact current repository state and all required commands passed."
-      : "Receipt is stale or does not match the active session and trusted commands.",
+    valid: completionAuthorized,
+    evidenceValid,
+    inspectionOnly,
+    completionAuthorized,
+    reason: completionAuthorized
+      ? inspectionOnly
+        ? "Inspection-only completion is explicitly allowed by the trusted policy."
+        : "Receipt matches the exact current repository state and all required commands passed."
+      : evidenceValid && inspectionOnly
+        ? "Inspection-only evidence is current, but the trusted policy does not authorize completion without validation commands."
+        : "Receipt is stale or does not match the active session and trusted commands.",
     receiptPath: pointer.path,
     inspection: inspection.inspection,
   };

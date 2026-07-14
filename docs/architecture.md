@@ -52,7 +52,7 @@ verify
   inspect/fingerprint before commands
   run trusted baseline commands
   inspect/fingerprint after commands
-  write passed receipt + active pointer only if all checks pass
+  write passed or inspection-only evidence + active pointer
         |
         v
 can-stop/status
@@ -99,7 +99,7 @@ content changes the fingerprint. Unmerged index stages block inspection with
 `.git/**` and `.judgelock/**` are always excluded from content inspection.
 Ordinary ignored patterns remove build output and similar noise, while explicit
 protected patterns take precedence. Submodule Git-link changes are captured, but
-nested submodule worktrees are not recursively inspected in 0.1.0.
+nested submodule worktrees are not recursively inspected in 0.1.0-beta.1.
 
 Files are statted before and after hashing and Git status is recaptured.
 JudgeLock retries a changing snapshot twice, then reports unstable state rather

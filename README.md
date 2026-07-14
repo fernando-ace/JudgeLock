@@ -1,91 +1,100 @@
 # JudgeLock
 
-JudgeLock is an open-source test-integrity firewall for coding agents. It
-records a trusted Git baseline, detects attempts to weaken the evidence used to
-judge a task, runs repository-owned validation commands, and issues a
-tamper-evident receipt for the exact repository state that passed.
+JudgeLock is a test-integrity firewall for coding agents. Ordinary CI answers
+“does the current code pass the current tests?” JudgeLock additionally records a
+trusted Git baseline, blocks changes that weaken that baseline, runs trusted
+validation commands, and binds completion evidence to the repository state that
+was checked.
 
-JudgeLock does not decide whether application code is correct. It makes it
-harder for an automated change to appear successful by deleting, skipping,
-narrowing, or weakening the tests and validation rules that were supposed to
-judge it.
+Consider a patch that makes a failing task appear successful by changing its
+judge:
 
-The operating principle is simple: **an agent should not grade its own
-homework**. The agent may change the contestant (production code and genuinely
-new regression tests), but it may not silently rewrite the judge.
+```diff
+-test("rejects duplicate invoices", () => {
+-  expect(createInvoice("A-42")).toThrow("duplicate");
+-});
++test.skip("rejects duplicate invoices", () => {});
+```
 
-> **Package status:** `judgelock@0.1.0` is not published to npm yet. Commands
-> below use a source checkout or locally packed tarball. The version-pinned npm
-> CI example becomes directly usable after publication.
+JudgeLock reports the evidence change instead of accepting the result:
 
-## Requirements
+```text
+BLOCKED  EXISTING_TEST_MODIFIED
+tests/invoice.test.ts
+
+BLOCKED  SKIPPED_TEST_ADDED
+tests/invoice.test.ts:1:1
+```
+
+The legitimate workflow keeps the baseline judge intact:
+
+```sh
+npx judgelock start --task "Fix duplicate invoice creation"
+# Change production code and add a new regression test.
+npx judgelock inspect
+npx judgelock verify
+npx judgelock hook can-stop
+```
+
+> **Package status:** `judgelock@0.1.0-beta.1` is a release candidate and has
+> not been published to npm. Use a reviewed checkout or packed tarball until a
+> release is published.
+
+## What is enforced
+
+| Classification                         | Capabilities                                                                                                                                                                                                      |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fully enforced for matched paths/state | Immutable baseline-test edits, deletion, snapshot changes, protected paths, trusted-base policy loading, policy downgrade rejection, receipt digest/state/command binding, stale-receipt rejection                |
+| Deterministic heuristic analysis       | Test renames, skipped/focused tests, assertion removal or weakening, empty tests, literal timeout increases, static coverage reductions/exclusions, static test-discovery narrowing, protected npm-script changes |
+| Unsupported                            | Proving original test quality, semantic equivalence for arbitrary frameworks or dynamic configuration, intercepting every shell/filesystem write, signed or unforgeable local attestation                         |
+
+Heuristic checks fail closed for guarded baseline-test edits when analysis is
+inconclusive. Under the default `immutable` policy, any baseline-test content
+change is independently blocked even when no semantic classification is
+available. Git rename classification is supplemental: deleting the old baseline
+test remains blocked if a heavily changed rename appears as delete-plus-add.
+
+## Requirements and installation
 
 - Node.js 22 or newer
 - Git with at least one commit
-- A repository-owned `judgelock.yml` committed to the trusted baseline
+- A committed, repository-owned `judgelock.yml`
 
-## Install from source
+From a reviewed checkout:
 
 ```sh
-cd /path/to/JudgeLock
 npm ci
 npm run build
-npm link
-judgelock --version
+npm pack
+npm install --save-dev ./judgelock-0.1.0-beta.1.tgz
+npx judgelock --version
 ```
 
-To avoid a global link, invoke `node /absolute/path/to/JudgeLock/dist/cli.js`
-wherever the examples use `judgelock`. You can also run `npm pack`, install the
-resulting tarball into a separate tool directory, and invoke its binary from
-there.
+JudgeLock does not require `npm link` or a global installation. The release
+smoke test installs the real tarball in an unrelated temporary repository.
 
-After the package is published, the five-minute workflow is:
+## Initialize and verify
 
 ```sh
-npm install --save-dev judgelock
 npx judgelock init
+# Add real lint, type-check, test, and build commands to judgelock.yml.
 git add judgelock.yml .gitignore
 git commit -m "Add JudgeLock policy"
-npx judgelock start --task "Fix duplicate invoice creation"
 
-# Let the coding agent work.
+npx judgelock start --task "Fix invoice rounding"
 npx judgelock inspect
 npx judgelock verify
-npx judgelock status
+npx judgelock hook can-stop
+npx judgelock status --json
 ```
 
-## Quick start
-
-Run initialization in the repository that should be protected:
-
-```sh
-cd my-project
-judgelock init
-```
-
-Review `judgelock.yml`, add real project commands under `validation.commands`,
-then commit it. `init` deliberately leaves that list empty because JudgeLock
-cannot safely guess how a repository is validated.
-
-Start an agent task only from a completely clean repository:
-
-```sh
-judgelock start --task "Fix invoice rounding"
-# Let the agent edit the repository and add regression tests.
-judgelock inspect
-judgelock verify
-judgelock hook can-stop
-judgelock status
-```
-
-The safe agent workflow is **start → add-only regression test → inspect → verify
-→ can-stop → report the receipt**. With the default `immutable` policy, existing
-baseline tests cannot change, while new tests are allowed and still checked for
-skips, focus markers, and other weakening patterns.
-
-An empty validation list is valid. In that case `verify` creates an
-inspection-only receipt and emits `NO_VALIDATION_COMMANDS`; no project lint,
-type-check, or tests were run.
+`init` leaves `validation.commands` empty because JudgeLock cannot safely guess
+how a project is validated. With the default
+`allowInspectionOnlyCompletion: false`, `verify` can still write an
+`inspection_only` evidence document, but `hook can-stop` returns exit 6 and CI
+returns exit 5. `status` explicitly reports that no tests, lint checks, type
+checks, or builds ran. Only a trusted policy can opt in to inspection-only
+completion.
 
 ## Commands
 
@@ -99,102 +108,84 @@ judgelock explain <violation-code>
 judgelock hook can-write --path <path> [--json]
 judgelock hook can-stop [--json]
 judgelock ci --base-ref <ref> [--json]
-judgelock install claude-code
+judgelock install claude-code [--autonomous-stop-hook]
 judgelock uninstall claude-code
 ```
 
-`inspect` analyzes current changes without running validation commands. `verify`
-invalidates any prior active receipt, inspects, fingerprints, runs trusted
-commands, and confirms that relevant state did not change while they ran.
-`status` is informational and normally exits successfully even when another
-verification is required. Use `--json` for one machine-readable result document.
+JSON commands emit one versioned envelope. Verification and status results
+expose `evidenceValid`, `inspectionOnly`, and `completionAuthorized`; consumers
+do not need to parse human warnings.
 
-| Exit | Meaning                                                             |
-| ---: | ------------------------------------------------------------------- |
-|    0 | Success or hook allow                                               |
-|    1 | Unexpected internal error                                           |
-|    2 | Invalid argument or configuration                                   |
-|    3 | Missing Git history, session, clean baseline, or other prerequisite |
-|    4 | Policy violation or denied write                                    |
-|    5 | Validation command or verification state-change failure             |
-|    6 | Completion blocked by a missing or stale receipt                    |
-|    7 | Corrupt JudgeLock state                                             |
-|    8 | Integration installation failure                                    |
+| Exit | Meaning                                                        |
+| ---: | -------------------------------------------------------------- |
+|    0 | Command succeeded or hook allowed                              |
+|    1 | Unexpected internal error                                      |
+|    2 | Invalid argument or configuration                              |
+|    3 | Missing Git/session/clean-baseline prerequisite                |
+|    4 | Policy violation or denied write                               |
+|    5 | Verification, command, state-change, or CI completion failure  |
+|    6 | Completion blocked by missing, stale, or insufficient evidence |
+|    7 | Corrupt JudgeLock state or receipt                             |
+|    8 | Integration installation failure                               |
 
-## CI
+## CI and other test tools
 
-Independent CI is the strongest JudgeLock control. The ready-copy npm workflow
-in
-[`examples/github-actions/judgelock.yml`](examples/github-actions/judgelock.yml)
-uses an unprivileged `pull_request` trigger, full Git history, the exact
-pull-request head SHA, and a trusted base ref. Until the npm package is
-published, replace its pinned `npm exec` step with an invocation of a reviewed
-local checkout or tarball.
+Ordinary CI proves that current code passes current tests. Test-quality linters
+inspect style or suspicious patterns in test code. JudgeLock protects a trusted
+baseline and trusted validation policy, then binds the result to exact relevant
+Git, index, worktree, and untracked state. These controls complement one
+another.
 
-In CI, policy bytes and validation commands come from the resolved base-ref tip.
-The merge base is used only to classify pull-request changes. A pull request
-cannot make its own policy authoritative.
+`judgelock ci --base-ref <trusted-ref>` loads policy bytes and commands from the
+resolved base-ref tip; the candidate revision cannot make its own weaker policy
+authoritative. Use an unprivileged `pull_request` workflow with full Git history
+and no secrets. See [the CI guide](docs/ci.md) and the
+[ready-copy example](examples/github-actions/judgelock.yml).
 
 ## Agent hooks
 
-`hook can-write` is a fast pre-write decision for integrations. It blocks
-policy/state/integration files, protected files, immutable existing tests,
-protected snapshots, and disallowed new tests. Guarded test edits still require
-authoritative content analysis by `inspect`.
+`hook can-write` provides deterministic early path decisions for integrations,
+but arbitrary shell commands can bypass pre-write hooks. `inspect`, `verify`,
+and independent CI remain authoritative.
 
-`hook can-stop` permits completion only when the active local session points to
-a passed, digest-valid receipt for the current repository fingerprint and
-trusted command set. Hooks improve the feedback loop; they are not a security
-boundary and cannot intercept every way a process might modify files.
+`judgelock install claude-code` installs:
 
-See [`docs/hooks.md`](docs/hooks.md) for the hook contract. Integration-specific
-installation guides live under `docs/integrations/`.
+- `PreToolUse` for `Edit|Write`; and
+- `TaskCompleted` for workflows that explicitly use Claude Code tasks.
 
-## What a receipt means
+It does not block every normal Claude `Stop` by default, so clarification,
+partial-progress, waiting-for-input, and recovery responses can end normally.
+`--autonomous-stop-hook` enables a blocking Stop gate only for autonomous
+single-task sessions. The launcher honors `stop_hook_active` to avoid loops and
+does not interpret `last_assistant_message` with an LLM or textual heuristic.
+See [the Claude Code integration guide](docs/integrations/claude-code.md).
 
-A receipt binds a result to the baseline commit, current `HEAD`, staged and
-unstaged state, relevant untracked content, trusted policy, command identities,
-runtime, and complete output hashes. It is protected by a canonical SHA-256
-digest, but it is not a signature or a cryptographic attestation. Anyone who can
-rewrite repository state can also replace local JudgeLock state, which is why an
-independently controlled CI run matters.
+## Receipts and limitations
 
-Learn more in:
+A receipt binds the baseline, current `HEAD`, staged and unstaged state,
+relevant untracked files, trusted policy, command identities, runtime, and
+complete output hashes. Retained output is bounded and redacted; the full raw
+stream is hashed before truncation.
 
-- [`docs/configuration.md`](docs/configuration.md)
-- [`docs/violations.md`](docs/violations.md)
-- [`docs/receipts.md`](docs/receipts.md)
-- [`docs/ci.md`](docs/ci.md)
-- [`docs/architecture.md`](docs/architecture.md)
-- [`docs/security-model.md`](docs/security-model.md)
+A local receipt is tamper-evident, not unforgeable. It is not signed and is not
+a cryptographic attestation. A user who can rewrite repository and JudgeLock
+state can recompute local digests. Independent CI under separate control is the
+stronger enforcement boundary.
 
-## Important limitations
+JudgeLock cannot prove that application code is correct, that tests are
+sufficient, or that ignored paths are irrelevant. Validation commands execute
+repository code and should run without secrets in a sandboxed CI job.
 
-- JudgeLock cannot prove that the original tests or their expectations are
-  correct.
-- Assertion and configuration analysis deliberately uses documented,
-  deterministic heuristics rather than claiming full semantic equivalence.
-- A fully malicious local user can replace local state and recompute receipt
-  digests; CI controlled outside the change is the stronger check.
-- Verification commands execute repository code and belong in an unprivileged,
-  sandboxed CI job without secrets.
-- JudgeLock reduces false confidence; it does not replace code review.
+Further documentation:
 
-## Demo
+- [Configuration](docs/configuration.md)
+- [Receipts](docs/receipts.md)
+- [Hooks](docs/hooks.md)
+- [Security model](docs/security-model.md)
+- [Architecture](docs/architecture.md)
+- [Violation codes](docs/violations.md)
 
-The demo creates a disposable real Git repository, proves that a cheating test
-edit is blocked, applies a legitimate source fix with a new regression test,
-verifies it, then proves that a later source change makes the receipt stale.
-
-```sh
-npm ci
-npm run demo
-```
-
-Run `node examples/vulnerable-demo/demo.mjs --keep` after building to retain the
-temporary repository and print commands for manual exploration.
-
-## Development
+## Release validation
 
 ```sh
 npm ci
@@ -203,9 +194,23 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
+npm run benchmark
+npm run benchmark -- --json
 npm pack --dry-run --json
+npm run smoke:package
 npm run demo
 ```
 
-JudgeLock is MIT licensed. See [`CONTRIBUTING.md`](CONTRIBUTING.md) and
-[`SECURITY.md`](SECURITY.md) before contributing or reporting a vulnerability.
+`npm run benchmark` applies 30 known attacks and 10 legitimate controls to
+disposable real Git repositories. It exits nonzero if an attack escapes, a
+control is blocked, or an expected decision code is missing. The repository CI
+runs the full release gates on Ubuntu and Windows with Node.js 22, plus source
+validation on Ubuntu with Node.js 24.
+
+During the 2026-07-14 release audit, the command passed **40/40 cases with zero
+false negatives and zero false positives** on Windows and Linux Node.js 22. The
+packed-package smoke also passed on both platforms with 22 allowlisted tarball
+entries.
+
+JudgeLock is MIT licensed. See [CONTRIBUTING.md](CONTRIBUTING.md) and
+[SECURITY.md](SECURITY.md) before contributing or reporting a vulnerability.

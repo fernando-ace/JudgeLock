@@ -12,7 +12,11 @@ export class TestRepository {
   }
 
   static async create(
-    options: { command?: string; allowPolicyChanges?: boolean } = {},
+    options: {
+      command?: string;
+      allowPolicyChanges?: boolean;
+      allowInspectionOnlyCompletion?: boolean;
+    } = {},
   ): Promise<TestRepository> {
     const path = await mkdtemp(join(tmpdir(), "judgelock-test-"));
     const repo = new TestRepository(path);
@@ -32,6 +36,11 @@ export class TestRepository {
       config = config.replace(
         "allowPolicyChanges: false",
         "allowPolicyChanges: true",
+      );
+    if (options.allowInspectionOnlyCompletion)
+      config = config.replace(
+        "allowInspectionOnlyCompletion: false",
+        "allowInspectionOnlyCompletion: true",
       );
     await repo.write("judgelock.yml", config);
     await repo.write(".gitignore", "/.judgelock/\n/node_modules/\n/dist/\n");
@@ -79,6 +88,11 @@ export class TestRepository {
   }
 
   async cleanup(): Promise<void> {
-    await rm(this.path, { recursive: true, force: true });
+    await rm(this.path, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
   }
 }

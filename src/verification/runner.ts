@@ -26,10 +26,12 @@ async function terminateProcessTree(
     return;
   }
   if (process.platform === "win32") {
-    await execa("taskkill", ["/pid", String(pid), "/T", "/F"], {
+    const result = await execa("taskkill", ["/pid", String(pid), "/T", "/F"], {
       reject: false,
+      timeout: 3_000,
       windowsHide: true,
     });
+    if (result.exitCode !== 0) fallback();
     return;
   }
   try {

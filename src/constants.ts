@@ -1,4 +1,4 @@
-export const JUDGELOCK_VERSION = "0.1.0";
+export const JUDGELOCK_VERSION = "0.1.0-beta.1";
 export const CONFIG_FILE = "judgelock.yml";
 export const STATE_DIRECTORY = ".judgelock";
 export const SESSION_FILE = ".judgelock/session.json";

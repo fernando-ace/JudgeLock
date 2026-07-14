@@ -7,6 +7,27 @@ All notable changes to JudgeLock are documented here. This project follows
 
 No unreleased changes yet.
 
+## [0.1.0-beta.1] - 2026-07-14
+
+### Security
+
+- Inspection-only evidence no longer authorizes local or CI completion by
+  default; trusted policy must opt in explicitly.
+- Claude Code installation now uses `TaskCompleted` by default and makes the
+  global blocking Stop hook opt-in and loop-safe.
+
+### Added
+
+- Deterministic 30-attack/10-control real-Git benchmark with JSON reporting.
+- Automated packed-tarball smoke coverage and Ubuntu/Windows release gates.
+- Structured evidence validity, inspection-only, and completion-authorization
+  fields in verification and status results.
+
+### Changed
+
+- Release version and documentation claims are narrowed to verified
+  `0.1.0-beta.1` behavior.
+
 ## [0.1.0] - 2026-07-10
 
 ### Added

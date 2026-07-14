@@ -127,7 +127,7 @@ export async function canStop(
   cwd: string,
 ): Promise<{ decision: HookStopDecision; exitCode: number }> {
   const validation = await validateActiveReceipt(cwd);
-  if (!validation.valid) {
+  if (!validation.completionAuthorized) {
     return {
       decision: {
         schemaVersion: 1,

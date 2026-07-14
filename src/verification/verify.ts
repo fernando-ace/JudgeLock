@@ -21,9 +21,12 @@ import { runVerificationCommand } from "./runner";
 
 export interface VerificationRunResult {
   passed: boolean;
+  evidenceValid: boolean;
+  inspectionOnly: boolean;
+  completionAuthorized: boolean;
   receiptPath: string;
   receipt: VerificationReceiptV1;
-  failureKind?: "policy" | "command" | "state-changed";
+  failureKind?: "policy" | "command" | "state-changed" | "inspection-only";
 }
 
 async function executeCommands(options: {
@@ -93,7 +96,11 @@ function buildPayload(options: {
       platform: process.platform,
       arch: process.arch,
     },
-    finalStatus: failed ? "failed" : "passed",
+    finalStatus: failed
+      ? "failed"
+      : options.commands.length === 0
+        ? "inspection_only"
+        : "passed",
     ...(options.failureReason === undefined
       ? {}
       : { failureReason: options.failureReason }),
@@ -175,8 +182,16 @@ export async function verifyLocal(
       receiptDigest: stored.receipt.digest.value,
     });
   }
+  const inspectionOnly = payload.finalStatus === "inspection_only";
+  const completionAuthorized =
+    !failureKind &&
+    (!inspectionOnly ||
+      context.config.validation.allowInspectionOnlyCompletion);
   return {
     passed: failureKind === undefined,
+    evidenceValid: failureKind === undefined,
+    inspectionOnly,
+    completionAuthorized,
     receiptPath: stored.relativePath,
     receipt: stored.receipt,
     ...(failureKind === undefined ? {} : { failureKind }),
@@ -238,7 +253,7 @@ export async function verifyCi(
   const stateChanged =
     before.inspection.repositoryStateFingerprint !==
     after.inspection.repositoryStateFingerprint;
-  const failureKind =
+  const executionFailureKind =
     before.inspection.status === "blocked"
       ? "policy"
       : commands.some((command) => command.status !== "passed")
@@ -260,8 +275,19 @@ export async function verifyCi(
       : {}),
   });
   const stored = await writeReceipt({ root: git.root, config, payload });
+  const inspectionOnly = payload.finalStatus === "inspection_only";
+  const evidenceValid = executionFailureKind === undefined;
+  const completionAuthorized =
+    evidenceValid &&
+    (!inspectionOnly || config.validation.allowInspectionOnlyCompletion);
+  const failureKind =
+    executionFailureKind ??
+    (inspectionOnly && !completionAuthorized ? "inspection-only" : undefined);
   return {
-    passed: failureKind === undefined,
+    passed: completionAuthorized,
+    evidenceValid,
+    inspectionOnly,
+    completionAuthorized,
     receiptPath: stored.relativePath,
     receipt: stored.receipt,
     ...(failureKind === undefined ? {} : { failureKind }),

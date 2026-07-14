@@ -208,7 +208,7 @@ export function buildProgram(): Command {
       await runAction("status", options.json ?? false, async () => {
         const result = await getStatus(currentDirectory());
         const human = result.active
-          ? `Session: active\nTask: ${result.task ?? "unknown"}\nBaseline: ${result.baselineCommit ?? "unknown"}\nInspection: ${result.inspection ?? "unavailable"}\nValid receipt: ${result.validReceipt === true ? "yes" : "no"}\n${result.receiptPath ? `Receipt: ${result.receiptPath}\n` : ""}${result.warning ? `${result.warning}\n` : ""}Next: ${result.nextAction}\n`
+          ? `Session: active\nTask: ${result.task ?? "unknown"}\nBaseline: ${result.baselineCommit ?? "unknown"}\nInspection: ${result.inspection ?? "unavailable"}\nEvidence valid: ${result.evidenceValid === true ? "yes" : "no"}\nInspection only: ${result.inspectionOnly === true ? "yes" : "no"}\nCompletion authorized: ${result.completionAuthorized === true ? "yes" : "no"}\n${result.receiptPath ? `Receipt: ${result.receiptPath}\n` : ""}${result.warning ? `${result.warning}\n` : ""}Next: ${result.nextAction}\n`
           : `Session: inactive\nNext: ${result.nextAction}\n`;
         return { result, exitCode: ExitCode.OK, human };
       });
@@ -316,13 +316,19 @@ export function buildProgram(): Command {
     .description("Install an agent integration.")
     .command("claude-code")
     .description("Install project-scoped Claude Code hooks.")
-    .action(async () => {
+    .option(
+      "--autonomous-stop-hook",
+      "block every normal Stop event until JudgeLock authorizes completion",
+    )
+    .action(async (options: { autonomousStopHook?: boolean }) => {
       await runAction("install claude-code", false, async () => {
-        const result = await installClaudeCode(currentDirectory());
+        const result = await installClaudeCode(currentDirectory(), {
+          autonomousStopHook: options.autonomousStopHook ?? false,
+        });
         return {
           result,
           exitCode: ExitCode.OK,
-          human: `${result.changed ? "Installed" : "Already installed"} Claude Code integration.\nSettings: ${result.settingsPath}\nLauncher: ${result.launcherPath}${result.backupPath ? `\nBackup: ${result.backupPath}` : ""}\n`,
+          human: `${result.changed ? "Installed" : "Already installed"} Claude Code integration.\nDefault task completion gate: enabled\nAutonomous Stop gate: ${result.autonomousStopHook === true ? "enabled" : "disabled"}\nSettings: ${result.settingsPath}\nLauncher: ${result.launcherPath}${result.backupPath ? `\nBackup: ${result.backupPath}` : ""}\n`,
         };
       });
     });

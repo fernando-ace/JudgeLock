@@ -38,9 +38,14 @@ async function exists(path: string): Promise<boolean> {
 
 afterEach(async () => {
   await Promise.all(
-    repositories
-      .splice(0)
-      .map((root) => rm(root, { recursive: true, force: true })),
+    repositories.splice(0).map((root) =>
+      rm(root, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      }),
+    ),
   );
 });
 
@@ -100,7 +105,7 @@ describe("Claude Code integration", () => {
         ],
       },
     ]);
-    expect(settings.hooks.Stop).toEqual([
+    expect(settings.hooks.TaskCompleted).toEqual([
       {
         hooks: [
           {
@@ -108,13 +113,14 @@ describe("Claude Code integration", () => {
             command: "node",
             args: [
               "${CLAUDE_PROJECT_DIR}/.claude/hooks/judgelock.cjs",
-              "can-stop",
+              "task-completed",
             ],
           },
         ],
       },
     ]);
-    expect(settings.hooks.Stop?.[0]).not.toHaveProperty("matcher");
+    expect(settings.hooks.TaskCompleted?.[0]).not.toHaveProperty("matcher");
+    expect(settings.hooks.Stop).toBeUndefined();
 
     const second = await installClaudeCode(root);
     expect(second).toMatchObject({
@@ -192,6 +198,7 @@ describe("Claude Code integration", () => {
     const missing = spawnSync(process.execPath, [launcherPath, "can-write"], {
       cwd: root,
       input: JSON.stringify({
+        hook_event_name: "PreToolUse",
         tool_name: "Write",
         tool_input: { file_path: "src/index.ts" },
         cwd: root,
@@ -216,6 +223,7 @@ describe("Claude Code integration", () => {
     const denied = spawnSync(process.execPath, [launcherPath, "can-write"], {
       cwd: root,
       input: JSON.stringify({
+        hook_event_name: "PreToolUse",
         tool_name: "Edit",
         tool_input: { file_path: "tests/example.test.ts" },
         cwd: root,
@@ -231,9 +239,9 @@ describe("Claude Code integration", () => {
     expect(denied.stderr).toContain("write denied by policy");
   });
 
-  it("forwards official Write and Stop payloads to the expected CLI commands", async () => {
+  it("forwards official Write, TaskCompleted, and opt-in Stop payloads", async () => {
     const root = await temporaryRepository();
-    await installClaudeCode(root);
+    await installClaudeCode(root, { autonomousStopHook: true });
     const launcherPath = join(root, ".claude", "hooks", "judgelock.cjs");
     const fakeCli = join(root, "fake-cli.cjs");
     const capturePath = join(root, "captured-args.json");
@@ -248,6 +256,7 @@ describe("Claude Code integration", () => {
       {
         cwd: root,
         input: JSON.stringify({
+          hook_event_name: "PreToolUse",
           tool_name: "Write",
           tool_input: { file_path: "src/new file.ts" },
           cwd: root,
@@ -270,11 +279,39 @@ describe("Claude Code integration", () => {
       "--json",
     ]);
 
+    const taskResult = spawnSync(
+      process.execPath,
+      [launcherPath, "task-completed"],
+      {
+        cwd: root,
+        input: JSON.stringify({
+          hook_event_name: "TaskCompleted",
+          task_id: "task-001",
+          task_subject: "Implement feature",
+          cwd: root,
+        }),
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          CLAUDE_PROJECT_DIR: root,
+          JUDGELOCK_CLI_PATH: fakeCli,
+          JUDGELOCK_CAPTURE: capturePath,
+        },
+      },
+    );
+    expect(taskResult.status).toBe(0);
+    expect(JSON.parse(await readFile(capturePath, "utf8"))).toEqual([
+      "hook",
+      "can-stop",
+      "--json",
+    ]);
+
     const stopResult = spawnSync(process.execPath, [launcherPath, "can-stop"], {
       cwd: root,
       input: JSON.stringify({
         hook_event_name: "Stop",
         stop_hook_active: false,
+        last_assistant_message: "Completed the requested task.",
         cwd: root,
       }),
       encoding: "utf8",
@@ -291,5 +328,50 @@ describe("Claude Code integration", () => {
       "can-stop",
       "--json",
     ]);
+
+    await writeFile(capturePath, "not-called");
+    const repeatedStop = spawnSync(
+      process.execPath,
+      [launcherPath, "can-stop"],
+      {
+        cwd: root,
+        input: JSON.stringify({
+          hook_event_name: "Stop",
+          stop_hook_active: true,
+          last_assistant_message: "Waiting for user input.",
+          cwd: root,
+        }),
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          CLAUDE_PROJECT_DIR: root,
+          JUDGELOCK_CLI_PATH: fakeCli,
+          JUDGELOCK_CAPTURE: capturePath,
+        },
+      },
+    );
+    expect(repeatedStop.status).toBe(0);
+    expect(await readFile(capturePath, "utf8")).toBe("not-called");
+  });
+
+  it("converges between default and autonomous Stop modes", async () => {
+    const root = await temporaryRepository();
+    await installClaudeCode(root, { autonomousStopHook: true });
+    let settings = JSON.parse(
+      await readFile(join(root, ".claude", "settings.json"), "utf8"),
+    ) as { hooks: Record<string, unknown> };
+    expect(settings.hooks.Stop).toBeDefined();
+
+    const defaultInstall = await installClaudeCode(root);
+    expect(defaultInstall.changed).toBe(true);
+    expect(defaultInstall.autonomousStopHook).toBe(false);
+    settings = JSON.parse(
+      await readFile(join(root, ".claude", "settings.json"), "utf8"),
+    ) as { hooks: Record<string, unknown> };
+    expect(settings.hooks.Stop).toBeUndefined();
+    expect(settings.hooks.TaskCompleted).toBeDefined();
+
+    const repeated = await installClaudeCode(root);
+    expect(repeated.changed).toBe(false);
   });
 });

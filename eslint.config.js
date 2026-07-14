@@ -23,6 +23,15 @@ export default tseslint.config(
   })),
   prettier,
   {
+    files: ["benchmark/**/*.mjs", "scripts/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        process: "readonly",
+        URL: "readonly",
+      },
+    },
+  },
+  {
     files: ["**/*.ts"],
     languageOptions: {
       parserOptions: {

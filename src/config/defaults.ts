@@ -17,6 +17,7 @@ coverage:
 
 validation:
   protectScripts: true
+  allowInspectionOnlyCompletion: false
   commands: []
   # - name: lint
   #   command: npm run lint

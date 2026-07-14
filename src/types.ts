@@ -182,7 +182,7 @@ export interface ReceiptPayloadV1 {
     platform: NodeJS.Platform;
     arch: string;
   };
-  finalStatus: "passed" | "failed";
+  finalStatus: "passed" | "failed" | "inspection_only";
   failureReason?: string;
 }
 

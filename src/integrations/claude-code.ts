@@ -22,6 +22,7 @@ interface ClaudeCodeOwnershipV1 {
   launcherPath: typeof LAUNCHER_RELATIVE_PATH;
   launcherSha256: string;
   settingsCreatedByJudgeLock: boolean;
+  autonomousStopHook?: boolean;
 }
 
 export interface ClaudeCodeIntegrationResult {
@@ -34,6 +35,11 @@ export interface ClaudeCodeIntegrationResult {
   changed: boolean;
   backupPath?: string;
   launcherSha256?: string;
+  autonomousStopHook?: boolean;
+}
+
+export interface ClaudeCodeInstallOptions {
+  autonomousStopHook?: boolean;
 }
 
 interface FileSnapshot {
@@ -105,10 +111,12 @@ const action = process.argv[2];
 const projectRoot = resolve(
   process.env.CLAUDE_PROJECT_DIR || (typeof input.cwd === "string" ? input.cwd : process.cwd()),
 );
-const cliPath = resolveCli(projectRoot);
 let args;
 
 if (action === "can-write") {
+  if (input.hook_event_name !== "PreToolUse") {
+    deny("JudgeLock can-write requires a PreToolUse hook payload.");
+  }
   if (input.tool_name !== "Edit" && input.tool_name !== "Write") {
     deny("JudgeLock can-write received an unexpected Claude Code tool name.");
   }
@@ -117,12 +125,31 @@ if (action === "can-write") {
     deny("JudgeLock can-write requires tool_input.file_path.");
   }
   args = ["hook", "can-write", "--path", filePath, "--json"];
+} else if (action === "task-completed") {
+  if (input.hook_event_name !== "TaskCompleted") {
+    deny("JudgeLock task-completed requires a TaskCompleted hook payload.");
+  }
+  if (typeof input.task_id !== "string" || typeof input.task_subject !== "string") {
+    deny("JudgeLock TaskCompleted input requires task_id and task_subject.");
+  }
+  args = ["hook", "can-stop", "--json"];
 } else if (action === "can-stop") {
+  if (input.hook_event_name !== "Stop" || typeof input.stop_hook_active !== "boolean") {
+    deny("JudgeLock can-stop requires a Stop hook payload with stop_hook_active.");
+  }
+  if (
+    input.last_assistant_message !== undefined &&
+    typeof input.last_assistant_message !== "string"
+  ) {
+    deny("JudgeLock Stop input last_assistant_message must be a string when present.");
+  }
+  if (input.stop_hook_active) process.exit(0);
   args = ["hook", "can-stop", "--json"];
 } else {
   deny("JudgeLock hook launcher received an unknown action.");
 }
 
+const cliPath = resolveCli(projectRoot);
 const result = spawnSync(process.execPath, [cliPath, ...args], {
   cwd: projectRoot,
   encoding: "utf8",
@@ -190,7 +217,9 @@ function isOwnedHandler(value: unknown): boolean {
     return false;
   return (
     value.args[0] === LAUNCHER_ARGUMENT &&
-    (value.args[1] === "can-write" || value.args[1] === "can-stop")
+    (value.args[1] === "can-write" ||
+      value.args[1] === "task-completed" ||
+      value.args[1] === "can-stop")
   );
 }
 
@@ -225,10 +254,17 @@ function hooksObject(settings: JsonObject): JsonObject {
   return { ...settings.hooks };
 }
 
-function withInstalledHooks(settings: JsonObject): JsonObject {
+function withInstalledHooks(
+  settings: JsonObject,
+  options: Required<ClaudeCodeInstallOptions>,
+): JsonObject {
   const next = structuredClone(settings);
   const hooks = hooksObject(next);
   const preToolUse = stripOwnedHandlers(hooks.PreToolUse, "PreToolUse");
+  const taskCompleted = stripOwnedHandlers(
+    hooks.TaskCompleted,
+    "TaskCompleted",
+  );
   const stop = stripOwnedHandlers(hooks.Stop, "Stop");
 
   preToolUse.push({
@@ -241,18 +277,30 @@ function withInstalledHooks(settings: JsonObject): JsonObject {
       },
     ],
   });
-  stop.push({
+  taskCompleted.push({
     hooks: [
       {
         type: "command",
         command: "node",
-        args: [LAUNCHER_ARGUMENT, "can-stop"],
+        args: [LAUNCHER_ARGUMENT, "task-completed"],
       },
     ],
   });
+  if (options.autonomousStopHook)
+    stop.push({
+      hooks: [
+        {
+          type: "command",
+          command: "node",
+          args: [LAUNCHER_ARGUMENT, "can-stop"],
+        },
+      ],
+    });
 
   hooks.PreToolUse = preToolUse;
-  hooks.Stop = stop;
+  hooks.TaskCompleted = taskCompleted;
+  if (stop.length > 0) hooks.Stop = stop;
+  else delete hooks.Stop;
   next.hooks = hooks;
   return next;
 }
@@ -262,10 +310,16 @@ function withoutInstalledHooks(settings: JsonObject): JsonObject {
   if (next.hooks === undefined) return next;
   const hooks = hooksObject(next);
   const preToolUse = stripOwnedHandlers(hooks.PreToolUse, "PreToolUse");
+  const taskCompleted = stripOwnedHandlers(
+    hooks.TaskCompleted,
+    "TaskCompleted",
+  );
   const stop = stripOwnedHandlers(hooks.Stop, "Stop");
 
   if (preToolUse.length > 0) hooks.PreToolUse = preToolUse;
   else delete hooks.PreToolUse;
+  if (taskCompleted.length > 0) hooks.TaskCompleted = taskCompleted;
+  else delete hooks.TaskCompleted;
   if (stop.length > 0) hooks.Stop = stop;
   else delete hooks.Stop;
 
@@ -302,7 +356,9 @@ function parseOwnership(bytes: Buffer | null): ClaudeCodeOwnershipV1 | null {
     value.launcherPath !== LAUNCHER_RELATIVE_PATH ||
     typeof value.launcherSha256 !== "string" ||
     !/^[a-f0-9]{64}$/u.test(value.launcherSha256) ||
-    typeof value.settingsCreatedByJudgeLock !== "boolean"
+    typeof value.settingsCreatedByJudgeLock !== "boolean" ||
+    (value.autonomousStopHook !== undefined &&
+      typeof value.autonomousStopHook !== "boolean")
   ) {
     fail(
       "Claude Code integration ownership state is invalid.",
@@ -368,6 +424,7 @@ function resultBase(
 
 export async function installClaudeCode(
   cwd: string,
+  options: ClaudeCodeInstallOptions = {},
 ): Promise<ClaudeCodeIntegrationResult> {
   try {
     const git = await GitClient.discover(cwd);
@@ -405,7 +462,10 @@ export async function installClaudeCode(
       }
     }
 
-    const nextSettings = withInstalledHooks(settings);
+    const installOptions: Required<ClaudeCodeInstallOptions> = {
+      autonomousStopHook: options.autonomousStopHook ?? false,
+    };
+    const nextSettings = withInstalledHooks(settings, installOptions);
     const settingsChanged = !settingsEqual(settings, nextSettings);
     const launcherChanged = !launcherBytes?.equals(expectedLauncherBytes);
     let backupPath: string | undefined;
@@ -429,6 +489,7 @@ export async function installClaudeCode(
       launcherSha256: expectedLauncherHash,
       settingsCreatedByJudgeLock:
         ownership?.settingsCreatedByJudgeLock ?? settingsBytes === null,
+      autonomousStopHook: installOptions.autonomousStopHook,
     };
     const nextOwnershipText = serializedJson(nextOwnership);
     const ownershipChanged =
@@ -442,6 +503,7 @@ export async function installClaudeCode(
       changed: settingsChanged || launcherChanged || ownershipChanged,
       ...(backupPath === undefined ? {} : { backupPath }),
       launcherSha256: expectedLauncherHash,
+      autonomousStopHook: installOptions.autonomousStopHook,
     };
   } catch (error) {
     if (
