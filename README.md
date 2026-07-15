@@ -1,5 +1,7 @@
 # JudgeLock
 
+[![npm beta version](https://img.shields.io/npm/v/judgelock/beta?label=npm%20beta)](https://www.npmjs.com/package/judgelock)
+
 JudgeLock is a test-integrity firewall for coding agents. Ordinary CI answers
 “does the current code pass the current tests?” JudgeLock additionally records a
 trusted Git baseline, blocks changes that weaken that baseline, runs trusted
@@ -38,8 +40,9 @@ npx judgelock hook can-stop
 ```
 
 > **Package status:** `judgelock@0.1.0-beta.1` is the initial npm beta release.
-> It is published under the `beta` distribution tag and is intentionally not
-> assigned to `latest` or described as stable.
+> Install it through the `beta` distribution tag; npm also points `latest` to
+> this version because it is currently the package's only release. It is not a
+> stable release.
 
 ## What is enforced
 
