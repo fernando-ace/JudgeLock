@@ -29,6 +29,7 @@ tests/invoice.test.ts:1:1
 The legitimate workflow keeps the baseline judge intact:
 
 ```sh
+npm install --save-dev judgelock@beta
 npx judgelock start --task "Fix duplicate invoice creation"
 # Change production code and add a new regression test.
 npx judgelock inspect
@@ -36,9 +37,9 @@ npx judgelock verify
 npx judgelock hook can-stop
 ```
 
-> **Package status:** `judgelock@0.1.0-beta.1` is a release candidate and has
-> not been published to npm. Use a reviewed checkout or packed tarball until a
-> release is published.
+> **Package status:** `judgelock@0.1.0-beta.1` is the initial npm beta release.
+> It is published under the `beta` distribution tag and is intentionally not
+> assigned to `latest` or described as stable.
 
 ## What is enforced
 
@@ -60,7 +61,20 @@ test remains blocked if a heavily changed rename appears as delete-plus-add.
 - Git with at least one commit
 - A committed, repository-owned `judgelock.yml`
 
-From a reviewed checkout:
+For normal beta use:
+
+```sh
+npm install --save-dev judgelock@beta
+npx judgelock --version
+```
+
+For reproducible projects and CI, install the exact beta:
+
+```sh
+npm install --save-dev --save-exact judgelock@0.1.0-beta.1
+```
+
+Release contributors can test an inspected tarball from a reviewed checkout:
 
 ```sh
 npm ci

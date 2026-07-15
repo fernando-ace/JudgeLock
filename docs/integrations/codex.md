@@ -8,6 +8,12 @@ repository, Codex can use `$judgelock` to follow the protected workflow:
 start -> add-only regression test -> inspect -> verify -> can-stop -> report receipt
 ```
 
+Install the exact beta used by the repository before invoking the workflow:
+
+```sh
+npm install --save-dev --save-exact judgelock@0.1.0-beta.1
+```
+
 Copy `.agents/skills/judgelock/` into the same path in another repository if the
 package manager does not preserve dot-directories from the installed package.
 Keep `judgelock.yml` at the Git root and install the exact JudgeLock version

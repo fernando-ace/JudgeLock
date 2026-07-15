@@ -30,8 +30,8 @@ new policy.
 ## GitHub Actions example
 
 [`examples/github-actions/judgelock.yml`](../examples/github-actions/judgelock.yml)
-is a ready-copy workflow for an npm-based repository after
-`judgelock@0.1.0-beta.1` is published. It:
+is a ready-copy workflow for an npm-based repository. It intentionally pins the
+public beta at `judgelock@0.1.0-beta.1` and:
 
 - uses only `pull_request` and `contents: read`;
 - checks out `github.event.pull_request.head.sha` with `fetch-depth: 0`;
@@ -43,12 +43,10 @@ is a ready-copy workflow for an npm-based repository after
 Do not change the trigger to `pull_request_target`: doing so can execute
 untrusted candidate code in a privileged secrets context.
 
-As of the source release, the npm package is not published. To test the workflow
-before publication, build and pack a reviewed JudgeLock checkout, make the
-tarball available through a trusted internal mechanism, install it into a
-separate tool prefix, and replace the
-`npm exec --package judgelock@0.1.0-beta.1` line with that reviewed binary. Do
-not commit a machine-specific absolute path into a shared workflow.
+Use the exact beta in CI rather than the mutable `beta` tag. For local beta use,
+install `judgelock@beta`; for reproducible workflows, keep
+`npm exec --package judgelock@0.1.0-beta.1`. Do not commit a machine-specific
+absolute path into a shared workflow.
 
 ## Other CI systems
 

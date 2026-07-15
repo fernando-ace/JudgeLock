@@ -4,6 +4,10 @@
   "description": "A test-integrity firewall for agentic coding tools.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fernando-ace/JudgeLock.git"
+  },
   "engines": {
     "node": ">=22"
   },

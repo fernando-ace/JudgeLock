@@ -1,5 +1,5 @@
-# Ready to copy after judgelock@0.1.0-beta.1 is published to npm.
-# Before publication, replace the npm exec step with a reviewed local/tarball binary.
+# This example intentionally pins the exact JudgeLock npm beta for reproducibility.
+# Update JUDGELOCK_VERSION only after reviewing and adopting a newer release.
 name: JudgeLock
 
 on:
