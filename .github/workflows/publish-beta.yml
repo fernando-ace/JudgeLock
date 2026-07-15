@@ -1,0 +1,541 @@
+name: Publish npm beta
+
+on:
+  push:
+    tags:
+      - "v*-beta.*"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-npm-beta
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Validate and publish npm beta
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PACKAGE_NAME: judgelock
+      NPM_CLI_VERSION: 11.18.0
+      NPM_REGISTRY: https://registry.npmjs.org/
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org/
+          package-manager-cache: false
+
+      - name: Install isolated npm CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          npm_prefix="${RUNNER_TEMP}/npm-cli-${NPM_CLI_VERSION}"
+          npm install \
+            --global \
+            --prefix "$npm_prefix" \
+            --no-audit \
+            --no-fund \
+            "npm@${NPM_CLI_VERSION}"
+
+          npm_cli="${npm_prefix}/bin/npm"
+          test -x "$npm_cli"
+          test "$("$npm_cli" --version)" = "$NPM_CLI_VERSION"
+
+          printf '%s\n' "${npm_prefix}/bin" >> "$GITHUB_PATH"
+          printf 'NPM_CLI=%s\n' "$npm_cli" >> "$GITHUB_ENV"
+
+          check_script="${RUNNER_TEMP}/check-npm-version-absent.mjs"
+          cat > "$check_script" <<'NODE'
+          import { spawnSync } from "node:child_process";
+
+          const { NPM_CLI, NPM_REGISTRY, PACKAGE_NAME, PACKAGE_VERSION } =
+            process.env;
+
+          for (const [name, value] of Object.entries({
+            NPM_CLI,
+            NPM_REGISTRY,
+            PACKAGE_NAME,
+            PACKAGE_VERSION,
+          })) {
+            if (!value) {
+              console.error(`::error::Missing required environment variable ${name}.`);
+              process.exit(1);
+            }
+          }
+
+          const spec = `${PACKAGE_NAME}@${PACKAGE_VERSION}`;
+          const result = spawnSync(
+            NPM_CLI,
+            ["view", spec, "version", "--json", "--registry", NPM_REGISTRY],
+            {
+              encoding: "utf8",
+              env: process.env,
+              maxBuffer: 4 * 1024 * 1024,
+            },
+          );
+
+          if (result.error) {
+            console.error(
+              `::error::npm registry query could not run: ${result.error.message}`,
+            );
+            process.exit(1);
+          }
+
+          if (result.status === 0) {
+            console.error(
+              `::error::${spec} already exists; refusing duplicate publication.`,
+            );
+            if (result.stdout.trim()) console.error(result.stdout.trim());
+            process.exit(1);
+          }
+
+          const stdout = result.stdout.trim();
+          const stderr = result.stderr.trim();
+          let errorCode;
+
+          try {
+            errorCode = JSON.parse(stdout)?.error?.code;
+          } catch {
+            // Fall back to npm's stable stderr code line.
+          }
+
+          if (!errorCode) {
+            errorCode = stderr.match(
+              /^npm (?:error|ERR!) code ([A-Z0-9]+)$/mu,
+            )?.[1];
+          }
+
+          if (errorCode !== "E404") {
+            if (stdout) console.error(stdout);
+            if (stderr) console.error(stderr);
+            console.error(
+              `::error::Registry preflight failed with ${errorCode ?? "an unknown error"}, not E404.`,
+            );
+            process.exit(result.status ?? 1);
+          }
+
+          console.log(`${spec} is absent from the registry (E404).`);
+          NODE
+
+          printf 'CHECK_VERSION_SCRIPT=%s\n' "$check_script" >> "$GITHUB_ENV"
+
+      - name: Validate release tag and package metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node --input-type=module <<'NODE'
+          import { appendFileSync, readFileSync } from "node:fs";
+
+          const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+          const fail = (message) => {
+            console.error(`::error::${message}`);
+            process.exit(1);
+          };
+
+          if (pkg.name !== process.env.PACKAGE_NAME) {
+            fail(`Expected package ${process.env.PACKAGE_NAME}, found ${pkg.name}.`);
+          }
+          if (pkg.private === true) {
+            fail("The release package is marked private.");
+          }
+          if (!/^\d+\.\d+\.\d+-beta\.\d+$/u.test(pkg.version)) {
+            fail(`Package version is not a supported beta version: ${pkg.version}`);
+          }
+          if (pkg.version === "0.1.0-beta.1") {
+            fail("0.1.0-beta.1 was published manually and must never be republished.");
+          }
+          if (process.env.GITHUB_REF_TYPE !== "tag") {
+            fail(`Expected a tag ref, received ${process.env.GITHUB_REF_TYPE}.`);
+          }
+          if (process.env.GITHUB_REF_NAME !== `v${pkg.version}`) {
+            fail(
+              `Tag ${process.env.GITHUB_REF_NAME} does not match package version ${pkg.version}.`,
+            );
+          }
+
+          const repositoryUrl =
+            typeof pkg.repository === "string"
+              ? pkg.repository
+              : pkg.repository?.url;
+          if (
+            repositoryUrl !==
+            "git+https://github.com/fernando-ace/JudgeLock.git"
+          ) {
+            fail(`Unexpected repository URL: ${repositoryUrl}`);
+          }
+
+          appendFileSync(
+            process.env.GITHUB_ENV,
+            `PACKAGE_VERSION=${pkg.version}\n`,
+          );
+          NODE
+
+          tag_commit="$(git rev-list -n 1 "$GITHUB_REF")"
+          head_commit="$(git rev-parse HEAD)"
+          if [[ "$tag_commit" != "$head_commit" ]]; then
+            echo "::error::Checked-out commit does not match the pushed tag."
+            exit 1
+          fi
+
+          git fetch --no-tags origin \
+            "+refs/heads/main:refs/remotes/origin/main"
+          if ! git merge-base --is-ancestor HEAD refs/remotes/origin/main; then
+            echo "::error::The tagged release commit is not contained in origin/main."
+            exit 1
+          fi
+
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "::error::The tagged checkout is not clean."
+            git status --short
+            exit 1
+          fi
+
+      - name: Confirm version is unpublished
+        shell: bash
+        run: node "$CHECK_VERSION_SCRIPT"
+
+      - name: Install dependencies
+        shell: bash
+        run: '"$NPM_CLI" ci'
+
+      - name: Validate source
+        shell: bash
+        run: '"$NPM_CLI" run validate'
+
+      - name: Run adversarial benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$NPM_CLI" run build
+          node benchmark/run.mjs --json
+
+      - name: Inspect package dry run
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$NPM_CLI" pack --dry-run --json \
+            | tee "${RUNNER_TEMP}/npm-pack-dry-run.log"
+
+      - name: Run end-to-end demo
+        shell: bash
+        run: '"$NPM_CLI" run demo'
+
+      - name: Test packed package
+        shell: bash
+        run: '"$NPM_CLI" run smoke:package'
+
+      - name: Confirm release gates left tracked source unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git diff --cached --check
+          git diff --exit-code
+          git diff --cached --exit-code
+
+          if find . -maxdepth 1 -type f -name "*.tgz" -print -quit \
+            | grep -q .; then
+            echo "::error::A package tarball was left in the source checkout."
+            exit 1
+          fi
+
+      - name: Create and inspect exact publication tarball
+        id: pack
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pack_dir="$(mktemp -d "${RUNNER_TEMP}/judgelock-publish.XXXXXX")"
+          pack_output="${RUNNER_TEMP}/judgelock-final-pack.log"
+
+          "$NPM_CLI" pack \
+            --json \
+            --pack-destination "$pack_dir" \
+            | tee "$pack_output"
+
+          node --input-type=module \
+            - "$pack_output" "$pack_dir" "$GITHUB_OUTPUT" <<'NODE'
+          import { spawnSync } from "node:child_process";
+          import { createHash } from "node:crypto";
+          import {
+            appendFileSync,
+            existsSync,
+            readFileSync,
+          } from "node:fs";
+          import { dirname, isAbsolute, relative, resolve } from "node:path";
+
+          const [packOutputPath, packDirectory, outputPath] =
+            process.argv.slice(2);
+          const fail = (message) => {
+            throw new Error(message);
+          };
+          const equalLists = (left, right) =>
+            left.length === right.length &&
+            left.every((value, index) => value === right[index]);
+
+          const expectedFiles = [
+            ".agents/skills/judgelock/SKILL.md",
+            ".agents/skills/judgelock/agents/openai.yaml",
+            "CHANGELOG.md",
+            "CONTRIBUTING.md",
+            "LICENSE",
+            "README.md",
+            "SECURITY.md",
+            "dist/cli.js",
+            "dist/index.d.ts",
+            "dist/index.js",
+            "docs/architecture.md",
+            "docs/ci.md",
+            "docs/configuration.md",
+            "docs/hooks.md",
+            "docs/integrations/claude-code.md",
+            "docs/integrations/codex.md",
+            "docs/receipts.md",
+            "docs/security-model.md",
+            "docs/violations.md",
+            "examples/github-actions/judgelock.yml",
+            "examples/vulnerable-demo/demo.mjs",
+            "package.json",
+          ].sort();
+
+          const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+          const packOutputLines = readFileSync(packOutputPath, "utf8").split(
+            /\r?\n/u,
+          );
+          let report;
+
+          for (let index = 0; index < packOutputLines.length; index += 1) {
+            if (packOutputLines[index].trim() !== "[") continue;
+            try {
+              const candidate = JSON.parse(
+                packOutputLines.slice(index).join("\n"),
+              );
+              if (Array.isArray(candidate) && candidate.length === 1) {
+                report = candidate;
+                break;
+              }
+            } catch {
+              // npm lifecycle output can precede the final JSON array.
+            }
+          }
+
+          if (!Array.isArray(report) || report.length !== 1) {
+            fail("npm pack did not end with one valid package report.");
+          }
+
+          const packed = report[0];
+          if (packed.name !== pkg.name || packed.version !== pkg.version) {
+            fail("npm pack metadata does not match package.json.");
+          }
+
+          const expectedFilename = `${pkg.name}-${pkg.version}.tgz`;
+          if (packed.filename !== expectedFilename) {
+            fail(`Unexpected tarball filename: ${packed.filename}`);
+          }
+
+          const listedFiles = packed.files
+            .map((file) => file.path.replaceAll("\\", "/"))
+            .sort();
+          if (new Set(listedFiles).size !== listedFiles.length) {
+            fail("npm pack reported duplicate file entries.");
+          }
+          if (!equalLists(listedFiles, expectedFiles)) {
+            fail(
+              `Unexpected npm pack manifest.\nExpected: ${expectedFiles.join(", ")}\nActual: ${listedFiles.join(", ")}`,
+            );
+          }
+
+          const normalizedPackDirectory = resolve(packDirectory);
+          const tarball = resolve(normalizedPackDirectory, packed.filename);
+          if (dirname(tarball) !== normalizedPackDirectory) {
+            fail("Tarball path escaped its external pack directory.");
+          }
+          if (!existsSync(tarball)) {
+            fail(`Tarball does not exist: ${tarball}`);
+          }
+
+          const workspaceRelative = relative(resolve(process.cwd()), tarball);
+          if (
+            workspaceRelative === "" ||
+            (!workspaceRelative.startsWith("..") &&
+              !isAbsolute(workspaceRelative))
+          ) {
+            fail("Final tarball was created inside the source checkout.");
+          }
+
+          const archiveResult = spawnSync("tar", ["-tzf", tarball], {
+            encoding: "utf8",
+          });
+          if (archiveResult.status !== 0) {
+            fail(`Could not list tarball: ${archiveResult.stderr}`);
+          }
+
+          const archiveFiles = archiveResult.stdout
+            .split(/\r?\n/u)
+            .filter(Boolean)
+            .filter((entry) => !entry.endsWith("/"))
+            .map((entry) => {
+              if (!entry.startsWith("package/")) {
+                fail(`Archive entry is outside package/: ${entry}`);
+              }
+              const path = entry.slice("package/".length);
+              if (
+                path === "" ||
+                path.startsWith("/") ||
+                path.split("/").includes("..")
+              ) {
+                fail(`Unsafe archive entry: ${entry}`);
+              }
+              return path;
+            })
+            .sort();
+
+          if (new Set(archiveFiles).size !== archiveFiles.length) {
+            fail("Tarball contains duplicate file entries.");
+          }
+          if (!equalLists(archiveFiles, expectedFiles)) {
+            fail(
+              `Tar archive differs from the approved manifest: ${archiveFiles.join(", ")}`,
+            );
+          }
+
+          const packageResult = spawnSync(
+            "tar",
+            ["-xOzf", tarball, "package/package.json"],
+            { encoding: "utf8" },
+          );
+          if (packageResult.status !== 0) {
+            fail(`Could not extract packed package.json: ${packageResult.stderr}`);
+          }
+
+          const embedded = JSON.parse(packageResult.stdout);
+          const repositoryUrl =
+            typeof embedded.repository === "string"
+              ? embedded.repository
+              : embedded.repository?.url;
+          const binPath = String(embedded.bin?.judgelock ?? "").replace(
+            /^\.\//u,
+            "",
+          );
+
+          if (
+            embedded.name !== "judgelock" ||
+            embedded.version !== pkg.version ||
+            embedded.private === true ||
+            embedded.license !== "MIT" ||
+            embedded.engines?.node !== ">=22" ||
+            repositoryUrl !==
+              "git+https://github.com/fernando-ace/JudgeLock.git" ||
+            binPath !== "dist/cli.js"
+          ) {
+            fail("Embedded package metadata failed release checks.");
+          }
+
+          const bytes = readFileSync(tarball);
+          const sha256 = createHash("sha256").update(bytes).digest("hex");
+          const sha512 = createHash("sha512").update(bytes).digest("hex");
+
+          appendFileSync(
+            outputPath,
+            `tarball=${tarball}\nsha256=${sha256}\nsha512=${sha512}\n`,
+          );
+
+          console.log(
+            JSON.stringify(
+              {
+                name: packed.name,
+                version: packed.version,
+                filename: packed.filename,
+                fileCount: archiveFiles.length,
+                packedSize: packed.size,
+                unpackedSize: packed.unpackedSize,
+                integrity: packed.integrity,
+                shasum: packed.shasum,
+                sha256,
+                sha512,
+              },
+              null,
+              2,
+            ),
+          );
+          NODE
+
+      - name: Publish inspected tarball under beta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node "$CHECK_VERSION_SCRIPT"
+
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "::error::Source checkout changed after validation."
+            git status --short
+            exit 1
+          fi
+
+          tarball="${{ steps.pack.outputs.tarball }}"
+          expected_sha256="${{ steps.pack.outputs.sha256 }}"
+          test -f "$tarball"
+
+          actual_sha256="$(sha256sum "$tarball" | awk '{print $1}')"
+          if [[ "$actual_sha256" != "$expected_sha256" ]]; then
+            echo "::error::The inspected tarball changed before publication."
+            exit 1
+          fi
+
+          "$NPM_CLI" publish "$tarball" \
+            --tag beta \
+            --access public \
+            --registry "$NPM_REGISTRY"
+
+      - name: Verify beta distribution tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tags_file="${RUNNER_TEMP}/published-dist-tags.json"
+          for attempt in 1 2 3 4 5; do
+            if "$NPM_CLI" view "$PACKAGE_NAME" dist-tags \
+              --json \
+              --registry "$NPM_REGISTRY" > "$tags_file"; then
+              if TAGS_FILE="$tags_file" \
+                EXPECTED_VERSION="$PACKAGE_VERSION" \
+                node --input-type=module -e '
+                  import { readFileSync } from "node:fs";
+                  const tags = JSON.parse(
+                    readFileSync(process.env.TAGS_FILE, "utf8"),
+                  );
+                  process.exit(
+                    tags.beta === process.env.EXPECTED_VERSION &&
+                    tags.latest !== process.env.EXPECTED_VERSION
+                      ? 0
+                      : 1,
+                  );
+                '; then
+                cat "$tags_file"
+                exit 0
+              fi
+            fi
+
+            if [[ "$attempt" -lt 5 ]]; then
+              sleep 5
+            fi
+          done
+
+          echo "::error::Published metadata did not converge to the required beta tag state."
+          test ! -f "$tags_file" || cat "$tags_file"
+          exit 1
